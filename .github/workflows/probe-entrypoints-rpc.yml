@@ -1,0 +1,54 @@
+# Throwaway probe for cloudflare/workers-sdk#15846: does the PR's code make
+# @fixture/entrypoints-rpc-tests time out on Windows more often than its base?
+# Same runner, same setup, the PR's 4 commits are the only difference.
+name: probe entrypoints-rpc on Windows
+
+on:
+  push:
+    branches: [probe/entrypoints-rpc-windows]
+
+jobs:
+  probe:
+    name: ${{ matrix.target }} shard ${{ matrix.shard }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [pr, base]
+        shard: [1, 2, 3]
+        include:
+          - target: pr
+            repo: oddharsh/workers-sdk
+            ref: 471282581c77991c6e1f52f5c90ff6bf9dc5692d
+          - target: base
+            repo: cloudflare/workers-sdk
+            ref: cc8e969750703538507b471a59e7d56045ebb640
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/install-dependencies
+
+      - name: Build the fixture's dependencies
+        shell: bash
+        run: pnpm turbo build -F @fixture/entrypoints-rpc-tests...
+
+      - name: Run the fixture 6 times
+        shell: bash
+        env:
+          NODE_OPTIONS: "--max_old_space_size=8192"
+        run: |
+          pass=0; fail=0
+          for i in 1 2 3 4 5 6; do
+            if pnpm -F @fixture/entrypoints-rpc-tests test:ci > "run-$i.log" 2>&1; then
+              pass=$((pass+1)); echo "run $i: pass"
+            else
+              fail=$((fail+1)); echo "run $i: FAIL"
+              grep -aE "FAIL |HeadersTimeout|Tests " "run-$i.log" | sort -u | head -8
+            fi
+          done
+          echo "PROBE_RESULT target=${{ matrix.target }} shard=${{ matrix.shard }} pass=$pass fail=$fail"
